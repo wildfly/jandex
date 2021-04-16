@@ -237,6 +237,11 @@ public final class FieldInfo implements AnnotationTarget {
     }
 
     @Override
+    public RecordComponentInfo asRecordComponent() {
+        throw new IllegalArgumentException("Not a record component");
+    }
+
+    @Override
     public int hashCode() {
         int result = 1;
         result = 31 * result + clazz.hashCode();
