@@ -61,6 +61,7 @@ final class IndexReaderV2 extends IndexReaderImpl {
     private static final byte TYPE_PARAMETER_BOUND_TAG = 8;
     private static final byte METHOD_PARAMETER_TYPE_TAG = 9;
     private static final byte THROWS_TYPE_TAG = 10;
+    private static final byte RECORD_COMPONENT_TAG = 11;
     private static final int AVALUE_BYTE = 1;
     private static final int AVALUE_SHORT = 2;
     private static final int AVALUE_INT = 3;
@@ -439,6 +440,11 @@ final class IndexReaderV2 extends IndexReaderImpl {
                 int pos = stream.readPackedU32();
                 return new ThrowsTypeTarget(caller, target, pos);
             }
+            case RECORD_COMPONENT_TAG: {
+                byte[] name = byteTable[stream.readPackedU32()];
+                Type type = typeTable[stream.readPackedU32()];
+                return new RecordComponentInfo((ClassInfo) caller, name, type);
+            }
         }
 
         throw new IllegalStateException("Invalid tag: " + tag);
@@ -584,6 +590,86 @@ final class IndexReaderV2 extends IndexReaderImpl {
         return clazz;
     }
 
+    private ModuleInfo readModuleEntry(PackedDataInputStream stream, ClassInfo moduleInfoClass) throws IOException {
+        DotName moduleName  = nameTable[stream.readPackedU32()];
+        short moduleFlags = (short) stream.readPackedU32();
+        String moduleVersion = stringTable[stream.readPackedU32()];
+        DotName mainClass = nameTable[stream.readPackedU32()];
+
+        ModuleInfo module = new ModuleInfo(moduleInfoClass, moduleName, moduleFlags, moduleVersion);
+        module.setMainClass(mainClass);
+
+        // requires
+        int requiredCount = stream.readPackedU32();
+        List<ModuleInfo.RequiredModuleInfo> requires = Utils.listOfCapacity(requiredCount);
+
+        for (int i = 0; i < requiredCount; i++) {
+            DotName name  = nameTable[stream.readPackedU32()];
+            short flags = (short) stream.readPackedU32();
+            String version = stringTable[stream.readPackedU32()];
+            requires.add(new ModuleInfo.RequiredModuleInfo(name, flags, version));
+        }
+
+        module.setRequires(requires);
+
+        // exports
+        int exportedCount = stream.readPackedU32();
+        List<ModuleInfo.ExportedPackageInfo> exports = Utils.listOfCapacity(exportedCount);
+
+        for (int i = 0; i < exportedCount; i++) {
+            DotName source  = nameTable[stream.readPackedU32()];
+            short flags = (short) stream.readPackedU32();
+            List<DotName> targets = readDotNames(stream);
+            exports.add(new ModuleInfo.ExportedPackageInfo(source, flags, targets));
+        }
+
+        module.setExports(exports);
+
+        // uses
+        module.setUses(readDotNames(stream));
+
+        // opens
+        int openedCount = stream.readPackedU32();
+        List<ModuleInfo.OpenedPackageInfo> opens = Utils.listOfCapacity(openedCount);
+
+        for (int i = 0; i < openedCount; i++) {
+            DotName source  = nameTable[stream.readPackedU32()];
+            short flags = (short) stream.readPackedU32();
+            List<DotName> targets = readDotNames(stream);
+            opens.add(new ModuleInfo.OpenedPackageInfo(source, flags, targets));
+        }
+
+        module.setOpens(opens);
+
+        // provides
+        int providedCount = stream.readPackedU32();
+        List<ModuleInfo.ProvidedServiceInfo> provides = Utils.listOfCapacity(providedCount);
+
+        for (int i = 0; i < providedCount; i++) {
+            DotName service  = nameTable[stream.readPackedU32()];
+            List<DotName> providers = readDotNames(stream);
+            provides.add(new ModuleInfo.ProvidedServiceInfo(service, providers));
+        }
+
+        module.setProvides(provides);
+
+        // packages
+        module.setPackages(readDotNames(stream));
+
+        return module;
+    }
+
+    private List<DotName> readDotNames(PackedDataInputStream stream) throws IOException {
+        int size = stream.readPackedU32();
+        List<DotName> names = Utils.listOfCapacity(size);
+
+        for (int i = 0; i < size; i++) {
+            names.add(nameTable[stream.readPackedU32()]);
+        }
+
+        return names;
+    }
+
     private void addToMaster(Map<DotName, List<AnnotationInstance>> masterAnnotations, DotName name,
                              List<AnnotationInstance> annotations) {
         List<AnnotationInstance> entry = masterAnnotations.get(name);
@@ -700,7 +786,29 @@ final class IndexReaderV2 extends IndexReaderImpl {
             users = Collections.emptyMap();
         }
 
-        return new Index(masterAnnotations, subclasses, implementors, classes, users);
+        Map<DotName, ModuleInfo> modules = (version > 9) ?
+            readModules(stream, masterAnnotations, version) : Collections.<DotName, ModuleInfo>emptyMap();
+
+        return new Index(masterAnnotations, subclasses, implementors, classes, modules, users);
+    }
+
+    private Map<DotName, ModuleInfo> readModules(PackedDataInputStream stream,
+                                                 Map<DotName, List<AnnotationInstance>> masterAnnotations,
+                                                 int version)
+                                                         throws IOException {
+
+        int modulesSize = stream.readPackedU32();
+        Map<DotName, ModuleInfo> modules = modulesSize > 0 ?
+            new HashMap<DotName, ModuleInfo>(modulesSize) :
+                Collections.<DotName, ModuleInfo>emptyMap();
+
+        for (int i = 0; i < modulesSize; i++) {
+            ClassInfo clazz = readClassEntry(stream, masterAnnotations, version);
+            ModuleInfo module = readModuleEntry(stream, clazz);
+            modules.put(module.name(), module);
+        }
+
+        return modules;
     }
 
     int toDataVersion(int version) {

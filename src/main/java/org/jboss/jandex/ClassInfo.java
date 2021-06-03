@@ -50,6 +50,7 @@ import java.util.Map;
  */
 public final class ClassInfo implements AnnotationTarget {
 
+    private static final int ACC_MODULE = 0x8000;
     private static final int MAX_POSITIONS = 256;
     private static final byte[] EMPTY_POSITIONS = new byte[0];
 
@@ -80,12 +81,14 @@ public final class ClassInfo implements AnnotationTarget {
         LOCAL,
 
         /** An unnamed class enclosed within a code block */
-        ANONYMOUS}
+        ANONYMOUS
+    }
 
     private static final class NestingInfo {
         private DotName enclosingClass;
         private String simpleName;
         private EnclosingMethodInfo enclosingMethod;
+        private ModuleInfo module;
     }
 
     /**
@@ -250,6 +253,13 @@ public final class ClassInfo implements AnnotationTarget {
      */
     public final boolean isAnnotation() {
         return (flags & Modifiers.ANNOTATION) != 0;
+    }
+
+    /**
+     * @return {@code true} if this class object represents a Java module descriptor
+     */
+    public final boolean isModule() {
+        return (flags & ACC_MODULE) != 0;
     }
 
     /**
@@ -456,7 +466,11 @@ public final class ClassInfo implements AnnotationTarget {
      * @return the field
      */
     public final FieldInfo field(String name) {
-        FieldInternal key = new FieldInternal(Utils.toUTF8(name), VoidType.VOID, (short)0);
+        return field(Utils.toUTF8(name));
+    }
+
+    FieldInfo field(byte[] name) {
+        FieldInternal key = new FieldInternal(name, VoidType.VOID, (short)0);
         int i = Arrays.binarySearch(fields, key, FieldInternal.NAME_COMPARATOR);
         if (i < 0) {
             return null;
@@ -576,7 +590,7 @@ public final class ClassInfo implements AnnotationTarget {
      * @return the nesting type of this class
      */
     public NestingType nestingType() {
-        if (nestingInfo == null) {
+        if (nestingInfo == null || nestingInfo.module != null) {
             return NestingType.TOP_LEVEL;
         } else if (nestingInfo.enclosingClass != null) {
             return NestingType.INNER;
@@ -623,6 +637,15 @@ public final class ClassInfo implements AnnotationTarget {
         return nestingInfo != null ? nestingInfo.enclosingMethod : null;
     }
 
+    /**
+     * Returns the module information from this class if it is a module descriptor, i.e. module-info.
+     *
+     * @return the module descriptor for module classes, otherwise null
+     */
+    public ModuleInfo module() {
+        return nestingInfo != null ? nestingInfo.module : null;
+    }
+
     @Override
     public ClassInfo asClass() {
         return this;
@@ -646,6 +669,11 @@ public final class ClassInfo implements AnnotationTarget {
     @Override
     public TypeTarget asType() {
         throw new IllegalArgumentException("Not a type");
+    }
+
+    @Override
+    public RecordComponentInfo asRecordComponent() {
+        throw new IllegalArgumentException("Not a record component");
     }
 
     void setHasNoArgsConstructor(boolean hasNoArgsConstructor) {
@@ -788,6 +816,18 @@ public final class ClassInfo implements AnnotationTarget {
         }
 
         nestingInfo.enclosingMethod = enclosingMethod;
+    }
+
+    void setModule(ModuleInfo module) {
+        if (module == null) {
+            return;
+        }
+
+        if (nestingInfo == null) {
+            nestingInfo = new NestingInfo();
+        }
+
+        nestingInfo.module = module;
     }
 
     void setFlags(short flags) {
