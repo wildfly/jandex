@@ -34,8 +34,8 @@ import java.util.List;
  * @author Jason T. Greene
  *
  */
-public final class FieldInfo implements AnnotationTarget {
-    
+public final class FieldInfo implements ContainingAnnotationTarget {
+
     private ClassInfo clazz;
     private FieldInternal internal;
 
@@ -106,6 +106,7 @@ public final class FieldInfo implements AnnotationTarget {
      *
      * @return the list of annotations on this field
      */
+    @Override
     public List<AnnotationInstance> annotations() {
         return internal.annotations();
     }
@@ -116,6 +117,7 @@ public final class FieldInfo implements AnnotationTarget {
      * @param name the name of the annotation to locate on this field
      * @return the annotation if found, otherwise, null
      */
+    @Override
     public final AnnotationInstance annotation(DotName name) {
         return internal.annotation(name);
     }
@@ -168,6 +170,7 @@ public final class FieldInfo implements AnnotationTarget {
      * @param name the name of the annotation to look for
      * @return true if the annotation is present, false otherwise
      */
+    @Override
     public final boolean hasAnnotation(DotName name) {
         return internal.hasAnnotation(name);
     }
